@@ -64,13 +64,13 @@ compile: compiling for every OS and Platform
 | -radosgw.access-secret    | -                  | Ceph rados access secret
 
 ## Metrics in prometheus
-| Name          		| Description     |
-| ------------  		| -------- |
-| s3_bucket_actual_size			| size of each s3 bucket.    |
-| s3_bucket_total_usage_size	| total usage all s3 buckets size.    |
-| s3_bucket_utilized_size	| utilized size each s3 bucket.    |
-| s3_bucket_num_objects	| number of objects each s3 bucket.    |
-| s3_bucket_per_user_usage_size	| size of each user in ceph.    |
-| s3_bucket_quota_max_size	| quota max size.    |
-| s3_bucket_quota_max_objects	| quota max objects.    |
-| s3_bucket_num_shards	| number of shards each s3 bucket.    |
+| Name          		            | Description     |
+|-----------------------------| -------- |
+| ceph_rgw_s3_actual_size			  | size of each s3 bucket.    |
+| ceph_rgw_s3_total_usage_size	    | total usage all s3 buckets size.    |
+| ceph_rgw_s3_utilized_size	       | utilized size each s3 bucket.    |
+| ceph_rgw_s3_num_objects	         | number of objects each s3 bucket.    |
+| ceph_rgw_s3_per_user_usage_size	 | size of each user in ceph.    |
+| ceph_rgw_s3_quota_max_size	      | quota max size.    |
+| ceph_rgw_s3_quota_max_objects	   | quota max objects.    |
+| ceph_rgw_s3_num_shards	          | number of shards each s3 bucket.    |
