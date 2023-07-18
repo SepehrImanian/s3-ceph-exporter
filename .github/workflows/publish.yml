@@ -1,0 +1,17 @@
+name: publish
+on: [push]
+jobs:
+  s3-ceph-exporter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and Push the s3-ceph-exporter Docker image
+        run: |
+          docker build . --tag ghcr.io/deselikem/s3-ceph-exporter:latest
+          docker push ghcr.io/deselikem/s3-ceph-exporter:latest
