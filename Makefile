@@ -4,7 +4,7 @@ radosgw_access_key="key"
 golang_metrics=true
 
 build:
-	go build -o bin/main main.go
+	go build -o s3-ceph-exporter s3-ceph-exporter.go
 
 run:
 	go run main.go -radosgw.server $(radosgw_server) \
