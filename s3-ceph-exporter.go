@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
@@ -31,10 +32,18 @@ type S3Collector struct {
 	bucketQuotaMaxSize         *prometheus.Desc
 	bucketQuotaMaxObjects      *prometheus.Desc
 	bucketNumShards            *prometheus.Desc
+	userQuotaMaxSize           *prometheus.Desc
+	userQuotaMaxObjects        *prometheus.Desc
 	cephAccessKey              string
 	cephSecretKey              string
 	cephGatewayURL             string
 	bucketStats                map[string]BucketStats
+	userStats                  UserStats
+}
+
+type UserStats struct {
+	MaxSize    float64 `json:"max_size"`
+	MaxObjects float64 `json:"max_objects"`
 }
 
 type BucketStats struct {
@@ -58,6 +67,46 @@ type UsageSizeDetails struct {
 	SizeActual   int `json:"size_kb_actual"`
 	SizeUtilized int `json:"size_kb_utilized"`
 	NumObjects   int `json:"num_objects"`
+}
+
+func (collector *S3Collector) updateUserLimitStats(uid string) (UserStats, error) {
+	// Generate the timestamp and date in UTC
+	date := time.Now().UTC().Format(time.RFC1123)
+
+	// Generate the string to sign
+	stringToSign := fmt.Sprintf("GET\n\n\n%s\n/admin/user", date)
+	hmac := hmac.New(sha1.New, []byte(collector.cephSecretKey))
+	hmac.Write([]byte(stringToSign))
+	signature := base64.StdEncoding.EncodeToString(hmac.Sum(nil))
+
+	// Send the request
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/admin/user?quota&uid=%s&quota-type=user", collector.cephGatewayURL, uid), nil)
+	if err != nil {
+		return UserStats{}, err
+	}
+
+	req.Header.Set("Host", strings.Split(req.URL.Host, ":")[0])
+	req.Header.Set("Date", date)
+	req.Header.Set("Authorization", fmt.Sprintf("AWS %s:%s", collector.cephAccessKey, signature))
+
+	res, err := client.Do(req)
+	if err != nil {
+		return UserStats{}, err
+	}
+
+	defer res.Body.Close()
+
+	// Read the response
+	var users UserStats
+	err = json.NewDecoder(res.Body).Decode(&users)
+	if err != nil {
+		return UserStats{}, err
+	}
+
+	collector.userStats = users
+
+	return users, nil
 }
 
 func (collector *S3Collector) updateBucketStats() error {
@@ -100,6 +149,21 @@ func (collector *S3Collector) updateBucketStats() error {
 	}
 
 	return nil
+}
+
+func GetAllUserLimits(collector *S3Collector, ch chan<- prometheus.Metric) {
+	seenUsers := make(map[string]bool)
+	for _, stats := range collector.bucketStats {
+		if !seenUsers[stats.BucketOwner] {
+			users, err := collector.updateUserLimitStats(string(stats.BucketOwner))
+			if err != nil {
+				return
+			}
+			ch <- prometheus.MustNewConstMetric(collector.userQuotaMaxSize, prometheus.GaugeValue, float64(users.MaxSize), stats.BucketOwner)
+			ch <- prometheus.MustNewConstMetric(collector.userQuotaMaxObjects, prometheus.GaugeValue, float64(users.MaxObjects), stats.BucketOwner)
+			seenUsers[stats.BucketOwner] = true
+		}
+	}
 }
 
 func CalculateBucketsTotalSizeMetric(collector *S3Collector, ch chan<- prometheus.Metric) {
@@ -186,6 +250,14 @@ func newS3Collector(cephAccessKey, cephSecretKey, cephGatewayURL string) *S3Coll
 			"bucket number of shards",
 			[]string{"name"}, nil,
 		),
+		userQuotaMaxSize: prometheus.NewDesc("ceph_rgw_user_quota_max_size",
+			"User limit size",
+			[]string{"user"}, nil,
+		),
+		userQuotaMaxObjects: prometheus.NewDesc("ceph_rgw_user_quota_max_objects",
+			"User max number of objects",
+			[]string{"user"}, nil,
+		),
 		cephAccessKey:  cephAccessKey,
 		cephSecretKey:  cephSecretKey,
 		cephGatewayURL: cephGatewayURL,
@@ -209,6 +281,8 @@ func (collector *S3Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- collector.bucketQuotaMaxObjects
 	ch <- collector.bucketQuotaMaxSize
 	ch <- collector.bucketNumShards
+	ch <- collector.userQuotaMaxSize
+	ch <- collector.userQuotaMaxObjects
 }
 
 func (collector *S3Collector) Collect(ch chan<- prometheus.Metric) {
@@ -219,6 +293,7 @@ func (collector *S3Collector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 
+	GetAllUserLimits(collector, ch)
 	PerUserUsageMetrics(collector, ch)
 	CalculateBucketsSizesMetrics(collector, ch)
 	CalculateBucketsTotalSizeMetric(collector, ch)
