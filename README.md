@@ -1,6 +1,6 @@
 # S3 CEPH EXPORTER
 
-A Prometheus exporter for monitoring s3 in ceph
+A Prometheus exporter for monitoring rgw,s3 in ceph
 
 ```bash
 ./s3_ceph_exporter -radosgw.server "http://localhost:9000" \
@@ -66,13 +66,13 @@ compile: compiling for every OS and Platform
 ## Metrics in prometheus
 | Name          		            | Description     |
 |-----------------------------| -------- |
-| ceph_rgw_s3_actual_size			  | size of each s3 bucket.    |
-| ceph_rgw_s3_total_usage_size	    | total usage all s3 buckets size.    |
-| ceph_rgw_s3_utilized_size	       | utilized size each s3 bucket.    |
-| ceph_rgw_s3_num_objects	         | number of objects each s3 bucket.    |
-| ceph_rgw_s3_per_user_usage_size	 | size of each user in ceph.    |
-| ceph_rgw_s3_quota_max_size	      | quota max size.    |
-| ceph_rgw_s3_quota_max_objects	   | quota max objects.    |
-| ceph_rgw_s3_num_shards	          | number of shards each s3 bucket.    |
-| ceph_rgw_s3_user_quota_max_size	          | User limit size    |
-| ceph_rgw_s3_user_quota_max_objects	          | User max number of objects    |
+| ceph_rgw_bucket_actual_size			  | size of each s3 bucket.    |
+| ceph_rgw_bucket_total_usage_size	    | total usage all s3 buckets size.    |
+| ceph_rgw_bucket_utilized_size	       | utilized size each s3 bucket.    |
+| ceph_rgw_bucket_num_objects	         | number of objects each s3 bucket.    |
+| ceph_rgw_bucket_quota_max_size	      | quota max size.    |
+| ceph_rgw_bucket_quota_max_objects	   | quota max objects.    |
+| ceph_rgw_bucket_num_shards	          | number of shards each s3 bucket.    |
+| ceph_rgw_user_usage_size	 | size of each user in ceph.    |
+| ceph_rgw_user_quota_max_size	          | User limit size    |
+| ceph_rgw_user_quota_max_objects	          | User max number of objects    |
