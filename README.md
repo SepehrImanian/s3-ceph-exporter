@@ -74,3 +74,5 @@ compile: compiling for every OS and Platform
 | ceph_rgw_s3_quota_max_size	      | quota max size.    |
 | ceph_rgw_s3_quota_max_objects	   | quota max objects.    |
 | ceph_rgw_s3_num_shards	          | number of shards each s3 bucket.    |
+| ceph_rgw_user_quota_max_size	          | User limit size    |
+| ceph_rgw_user_quota_max_objects	          | User max number of objects    |
