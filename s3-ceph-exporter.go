@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -69,37 +70,76 @@ type UsageSizeDetails struct {
 	NumObjects   int `json:"num_objects"`
 }
 
-func (collector *S3Collector) updateUserLimitStats(uid string) (UserStats, error) {
+/*
+##########################################
+########## Helper functions ##############
+##########################################
+*/
+
+func generateSignature(method, path, secretKey string) string {
+	stringToSign := fmt.Sprintf("%s\n\n\n%s\n%s", method, time.Now().UTC().Format(time.RFC1123), path)
+	hmac := hmac.New(sha1.New, []byte(secretKey))
+	hmac.Write([]byte(stringToSign))
+	return base64.StdEncoding.EncodeToString(hmac.Sum(nil))
+}
+
+func createRequest(url, accessKey, signature string) (*http.Request, error) {
 	// Generate the timestamp and date in UTC
 	date := time.Now().UTC().Format(time.RFC1123)
 
-	// Generate the string to sign
-	stringToSign := fmt.Sprintf("GET\n\n\n%s\n/admin/user", date)
-	hmac := hmac.New(sha1.New, []byte(collector.cephSecretKey))
-	hmac.Write([]byte(stringToSign))
-	signature := base64.StdEncoding.EncodeToString(hmac.Sum(nil))
-
-	// Send the request
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/admin/user?quota&uid=%s&quota-type=user", collector.cephGatewayURL, uid), nil)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return UserStats{}, err
+		return nil, err
 	}
-
 	req.Header.Set("Host", strings.Split(req.URL.Host, ":")[0])
 	req.Header.Set("Date", date)
-	req.Header.Set("Authorization", fmt.Sprintf("AWS %s:%s", collector.cephAccessKey, signature))
+	req.Header.Set("Authorization", fmt.Sprintf("AWS %s:%s", accessKey, signature))
+	return req, nil
+}
 
-	res, err := client.Do(req)
+func decodeResponse(responseBody io.Reader, target interface{}) error {
+	return json.NewDecoder(responseBody).Decode(target)
+}
+
+func getEnv(key string, defaultVal string) string {
+	if env, ok := os.LookupEnv(key); ok {
+		return env
+	}
+	return defaultVal
+}
+
+/*
+##########################################
+########## Helper functions End ##########
+##########################################
+*/
+
+/*
+##########################################
+######## Send Request to RGW Ceph ########
+##########################################
+*/
+
+func (collector *S3Collector) updateUserLimitStats(uid string) (UserStats, error) {
+	// Generate the string to sign
+	signature := generateSignature("GET", "/admin/user", collector.cephSecretKey)
+
+	// Send the request
+	url := fmt.Sprintf("%s/admin/user?quota&uid=%s&quota-type=user", collector.cephGatewayURL, uid)
+	req, err := createRequest(url, collector.cephAccessKey, signature)
 	if err != nil {
 		return UserStats{}, err
 	}
 
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return UserStats{}, err
+	}
 	defer res.Body.Close()
 
 	// Read the response
 	var users UserStats
-	err = json.NewDecoder(res.Body).Decode(&users)
+	err = decodeResponse(res.Body, &users)
 	if err != nil {
 		return UserStats{}, err
 	}
@@ -109,25 +149,24 @@ func (collector *S3Collector) updateUserLimitStats(uid string) (UserStats, error
 	return users, nil
 }
 
-func (collector *S3Collector) updateBucketStats() error {
-	// Generate the timestamp and date in UTC
-	date := time.Now().UTC().Format(time.RFC1123)
+func (collector *S3Collector) updateBucketStatsMap(buckets []BucketStats) {
+	collector.bucketStats = make(map[string]BucketStats)
+	for _, bucket := range buckets {
+		collector.bucketStats[bucket.Name] = bucket
+	}
+}
 
+func (collector *S3Collector) updateBucketStats() error {
 	// Generate the string to sign
-	stringToSign := fmt.Sprintf("GET\n\n\n%s\n/admin/bucket", date)
-	hmac := hmac.New(sha1.New, []byte(collector.cephSecretKey))
-	hmac.Write([]byte(stringToSign))
-	signature := base64.StdEncoding.EncodeToString(hmac.Sum(nil))
+	signature := generateSignature("GET", "/admin/bucket", collector.cephSecretKey)
 
 	// Send the request
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", collector.cephGatewayURL+"/admin/bucket?stats", nil)
+	url := fmt.Sprintf("%s/admin/bucket?stats", collector.cephGatewayURL)
+	req, err := createRequest(url, collector.cephAccessKey, signature)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Host", strings.Split(req.URL.Host, ":")[0])
-	req.Header.Set("Date", date)
-	req.Header.Set("Authorization", fmt.Sprintf("AWS %s:%s", collector.cephAccessKey, signature))
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -137,19 +176,28 @@ func (collector *S3Collector) updateBucketStats() error {
 
 	// Read the response
 	var buckets []BucketStats
-	err = json.NewDecoder(res.Body).Decode(&buckets)
+	err = decodeResponse(res.Body, &buckets)
 	if err != nil {
 		return err
 	}
 
 	// Update the bucket stats map
-	collector.bucketStats = make(map[string]BucketStats)
-	for _, bucket := range buckets {
-		collector.bucketStats[bucket.Name] = bucket
-	}
+	collector.updateBucketStatsMap(buckets)
 
 	return nil
 }
+
+/*
+##########################################
+##### Send Request to RGW Ceph END #######
+##########################################
+*/
+
+/*
+##########################################
+#### Calculate And Publish Metrics #######
+##########################################
+*/
 
 func GetAllUserLimits(collector *S3Collector, ch chan<- prometheus.Metric) {
 	seenUsers := make(map[string]bool)
@@ -216,6 +264,12 @@ func ExposeBucketQuotaMetrics(collector *S3Collector, ch chan<- prometheus.Metri
 	}
 }
 
+/*
+##########################################
+### Calculate And Publish Metrics END ####
+##########################################
+*/
+
 func newS3Collector(cephAccessKey, cephSecretKey, cephGatewayURL string) *S3Collector {
 	return &S3Collector{
 		sizeActualMetric: prometheus.NewDesc("ceph_rgw_bucket_actual_size",
@@ -263,13 +317,6 @@ func newS3Collector(cephAccessKey, cephSecretKey, cephGatewayURL string) *S3Coll
 		cephGatewayURL: cephGatewayURL,
 		bucketStats:    make(map[string]BucketStats),
 	}
-}
-
-func getEnv(key string, defaultVal string) string {
-	if env, ok := os.LookupEnv(key); ok {
-		return env
-	}
-	return defaultVal
 }
 
 func (collector *S3Collector) Describe(ch chan<- *prometheus.Desc) {
